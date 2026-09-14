@@ -1,0 +1,23 @@
+load("@rules_cc//cc:defs.bzl", "cc_library")
+
+genrule(
+    name = "generate_sleef_config",
+    srcs = ["sleef-config.h.in"],
+    outs = ["sleef-config.h"],
+    cmd = """
+sed \
+    -e 's|^#cmakedefine SLEEF_FLOAT128_IS_IEEEQP$$|/* #undef SLEEF_FLOAT128_IS_IEEEQP */|' \
+    -e 's|^#cmakedefine SLEEF_LONGDOUBLE_IS_IEEEQP$$|/* #undef SLEEF_LONGDOUBLE_IS_IEEEQP */|' \
+    -e 's|^#cmakedefine SLEEF_STATIC_LIBS$$|#define SLEEF_STATIC_LIBS 1|' \
+    -e 's|@SLEEF_VERSION_MAJOR@|3|g' \
+    -e 's|@SLEEF_VERSION_MINOR@|9|g' \
+    $(location sleef-config.h.in) > $@
+    """,
+)
+
+cc_library(
+    name = "sleef_config",
+    hdrs = [":generate_sleef_config"],
+    includes = ["include"],
+    visibility = ["//visibility:public"],
+)

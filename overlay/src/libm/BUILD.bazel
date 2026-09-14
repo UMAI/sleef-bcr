@@ -1,0 +1,159 @@
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library")
+
+cc_library(
+    name = "libm",
+    srcs = [
+        "dispatcher.h",
+        ":generate_dispscalar",
+        ":generate_renamedspscalar",
+    ],
+    hdrs = [
+        ":generate_sleef_header",
+    ],
+    includes = [
+        ".",
+        "include",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":purec_scalar",
+        ":purecfma_scalar",
+        ":rempitab",
+        "//src/arch:headers",
+        "//src/common:headers",
+    ],
+)
+
+cc_binary(
+    name = "mkrename",
+    srcs = [
+        "funcproto.h",
+        "mkrename.c",
+    ],
+)
+
+genrule(
+    name = "generate_renamedspscalar",
+    outs = ["include/renamedspscalar.h"],
+    cmd = "$(location :mkrename) - 1 1 > $@",
+    tools = [":mkrename"],
+)
+
+genrule(
+    name = "generate_renamepurec_scalar",
+    outs = ["include/renamepurec_scalar.h"],
+    cmd = "$(location :mkrename) cinz_ 1 1 purec > $@",
+    tools = [":mkrename"],
+)
+
+genrule(
+    name = "generate_renamepurecfma_scalar",
+    outs = ["include/renamepurecfma_scalar.h"],
+    cmd = "$(location :mkrename) finz_ 1 1 purecfma > $@",
+    tools = [":mkrename"],
+)
+
+cc_library(
+    name = "rempitab",
+    srcs = ["rempitab.c"],
+    deps = ["//src/common:headers"],
+)
+
+cc_library(
+    name = "purec_scalar",
+    srcs = [
+        "sleefsimddp.c",
+        "sleefsimdsp.c",
+        ":generate_renamepurec_scalar",
+    ],
+    includes = [
+        ".",
+        "include",
+    ],
+    local_defines = [
+        "DORENAME",
+        "ENABLE_PUREC_SCALAR",
+    ],
+    deps = [
+        ":rempitab",
+        "//src/arch:headers",
+        "//src/common:headers",
+    ],
+)
+
+cc_library(
+    name = "purecfma_scalar",
+    srcs = [
+        "sleefsimddp.c",
+        "sleefsimdsp.c",
+        ":generate_renamepurecfma_scalar",
+    ],
+    copts = [
+        "-mavx2",
+        "-mfma",
+    ],
+    includes = [
+        ".",
+        "include",
+    ],
+    local_defines = [
+        "DORENAME",
+        "ENABLE_PURECFMA_SCALAR",
+    ],
+    deps = [
+        ":rempitab",
+        "//src/arch:headers",
+        "//src/common:headers",
+    ],
+)
+
+cc_binary(
+    name = "mkdisp",
+    srcs = [
+        "funcproto.h",
+        "mkdisp.c",
+    ],
+)
+
+genrule(
+    name = "generate_dispscalar",
+    srcs = [
+        "dispscalar.c.org",
+        "dispscalar_footer.c.org",
+    ],
+    outs = ["dispscalar.c"],
+    cmd = """
+$(location :mkdisp) 1 1 double float int32_t purec purecfma x > $(@D)/body
+cat $(location dispscalar.c.org) $(@D)/body \
+    $(location dispscalar_footer.c.org) > $@
+    """,
+    tools = [":mkdisp"],
+)
+
+genrule(
+    name = "generate_sleef_header",
+    srcs = [
+        "sleeflibm_header.h.org.in",
+        "sleeflibm_footer.h.org",
+    ],
+    outs = ["include/sleef.h"],
+    cmd = """
+sed \
+    -e 's/@SLEEF_VERSION_MAJOR@/3/g' \
+    -e 's/@SLEEF_VERSION_MINOR@/9/g' \
+    -e 's/@SLEEF_VERSION_PATCH@/0/g' \
+    -e '/^#cmakedefine/d' \
+    $(location sleeflibm_header.h.org.in) > $(@D)/header
+
+$(location :mkrename) cinz_ 1 1 double float int32_t int32_t __STDC__ purec \
+  > $(@D)/purec
+$(location :mkrename) finz_ 1 1 double float int32_t int32_t __STDC__ purecfma \
+  > $(@D)/purecfma
+$(location :mkrename) - 1 1 double float int32_t int32_t __STDC__ \
+  > $(@D)/dsp
+
+cat $(@D)/header $(@D)/purec $(@D)/purecfma $(@D)/dsp \
+    $(location sleeflibm_footer.h.org) > $@
+    """,
+    tools = [":mkrename"],
+)

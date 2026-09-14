@@ -1,0 +1,35 @@
+load("@rules_cc//cc:defs.bzl", "cc_library")
+
+cc_library(
+    name = "headers",
+    hdrs = glob(["**/*.h"]),
+    includes = ["."],
+    visibility = [
+        "//src/libm:__pkg__",
+    ],
+    deps = ["//:sleef_config"],
+)
+
+cc_library(
+    name = "testerutil",
+    srcs = ["testerutil.c"],
+    hdrs = ["testerutil.h"],
+    visibility = ["//visibility:public"],
+    deps = [":headers"],
+)
+
+cc_library(
+    name = "psha2",
+    srcs = ["psha2_capi.cpp"],
+    hdrs = [
+        "psha2.hpp",
+        "psha2_capi.h",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "feature_main",
+    srcs = ["main_checkfeature.c"],
+    visibility = ["//visibility:public"],
+)

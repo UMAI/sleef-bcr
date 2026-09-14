@@ -1,0 +1,6 @@
+module(
+    name = "sleef",
+    version = "3.9.0",
+)
+
+bazel_dep(name = "rules_cc", version = "0.2.22")

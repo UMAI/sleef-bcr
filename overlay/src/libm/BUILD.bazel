@@ -1,135 +1,21 @@
 load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library")
+load(":implementation_library.bzl", "implementation_library")
 
+# Final library
 cc_library(
     name = "libm",
-    srcs = [
-        "dispatcher.h",
-        ":generate_dispscalar",
-        ":generate_renamedspscalar",
-    ],
     hdrs = [
         ":generate_sleef_header",
     ],
-    includes = [
-        ".",
-        "include",
-    ],
+    includes = ["include"],
     visibility = ["//visibility:public"],
     deps = [
-        ":purec_scalar",
-        ":purecfma_scalar",
-        ":rempitab",
-        "//src/arch:headers",
-        "//src/common:headers",
+        ":dispscalar",
+        ":dispsse",
     ],
 )
 
-cc_binary(
-    name = "mkrename",
-    srcs = [
-        "funcproto.h",
-        "mkrename.c",
-    ],
-)
-
-genrule(
-    name = "generate_renamedspscalar",
-    outs = ["include/renamedspscalar.h"],
-    cmd = "$(location :mkrename) - 1 1 > $@",
-    tools = [":mkrename"],
-)
-
-genrule(
-    name = "generate_renamepurec_scalar",
-    outs = ["include/renamepurec_scalar.h"],
-    cmd = "$(location :mkrename) cinz_ 1 1 purec > $@",
-    tools = [":mkrename"],
-)
-
-genrule(
-    name = "generate_renamepurecfma_scalar",
-    outs = ["include/renamepurecfma_scalar.h"],
-    cmd = "$(location :mkrename) finz_ 1 1 purecfma > $@",
-    tools = [":mkrename"],
-)
-
-cc_library(
-    name = "rempitab",
-    srcs = ["rempitab.c"],
-    deps = ["//src/common:headers"],
-)
-
-cc_library(
-    name = "purec_scalar",
-    srcs = [
-        "sleefsimddp.c",
-        "sleefsimdsp.c",
-        ":generate_renamepurec_scalar",
-    ],
-    includes = [
-        ".",
-        "include",
-    ],
-    local_defines = [
-        "DORENAME",
-        "ENABLE_PUREC_SCALAR",
-    ],
-    deps = [
-        ":rempitab",
-        "//src/arch:headers",
-        "//src/common:headers",
-    ],
-)
-
-cc_library(
-    name = "purecfma_scalar",
-    srcs = [
-        "sleefsimddp.c",
-        "sleefsimdsp.c",
-        ":generate_renamepurecfma_scalar",
-    ],
-    copts = [
-        "-mavx2",
-        "-mfma",
-    ],
-    includes = [
-        ".",
-        "include",
-    ],
-    local_defines = [
-        "DORENAME",
-        "ENABLE_PURECFMA_SCALAR",
-    ],
-    deps = [
-        ":rempitab",
-        "//src/arch:headers",
-        "//src/common:headers",
-    ],
-)
-
-cc_binary(
-    name = "mkdisp",
-    srcs = [
-        "funcproto.h",
-        "mkdisp.c",
-    ],
-)
-
-genrule(
-    name = "generate_dispscalar",
-    srcs = [
-        "dispscalar.c.org",
-        "dispscalar_footer.c.org",
-    ],
-    outs = ["dispscalar.c"],
-    cmd = """
-$(location :mkdisp) 1 1 double float int32_t purec purecfma x > $(@D)/body
-cat $(location dispscalar.c.org) $(@D)/body \
-    $(location dispscalar_footer.c.org) > $@
-    """,
-    tools = [":mkdisp"],
-)
-
+# Exposed header
 genrule(
     name = "generate_sleef_header",
     srcs = [
@@ -151,9 +37,166 @@ $(location :mkrename) finz_ 1 1 double float int32_t int32_t __STDC__ purecfma \
   > $(@D)/purecfma
 $(location :mkrename) - 1 1 double float int32_t int32_t __STDC__ \
   > $(@D)/dsp
+$(location :mkrename) cinz_ 2 4 __m128d __m128 __m128i __m128i __SSE2__ sse2 \
+  > $(@D)/sse2
+$(location :mkrename) cinz_ 2 4 __m128d __m128 __m128i __m128i __SSE2__ sse4 \
+  > $(@D)/sse4
+$(location :mkrename) finz_ 2 4 __m128d __m128 __m128i __m128i __SSE2__ avx2128 \
+  > $(@D)/avx2128
 
-cat $(@D)/header $(@D)/purec $(@D)/purecfma $(@D)/dsp \
+cat $(@D)/header $(@D)/purec $(@D)/purecfma $(@D)/dsp $(@D)/sse2 $(@D)/sse4 $(@D)/avx2128 \
     $(location sleeflibm_footer.h.org) > $@
     """,
     tools = [":mkrename"],
+)
+
+# Tools definition
+cc_binary(
+    name = "mkrename",
+    srcs = [
+        "funcproto.h",
+        "mkrename.c",
+    ],
+)
+
+cc_binary(
+    name = "mkdisp",
+    srcs = [
+        "funcproto.h",
+        "mkdisp.c",
+    ],
+)
+
+# Common targets
+cc_library(
+    name = "rempitab",
+    srcs = ["rempitab.c"],
+    deps = ["//src/common:headers"],
+)
+
+filegroup(
+    name = "simd_sources",
+    srcs = [
+        "sleefsimddp.c",
+        "sleefsimdsp.c",
+    ],
+)
+
+# Scalar dispatcher and instruction set implementations
+cc_library(
+    name = "dispscalar",
+    srcs = [
+        "dispatcher.h",
+        ":generate_dispscalar",
+        ":generate_sleef_header",
+    ],
+    includes = [
+        ".",
+        "include",
+    ],
+    deps = [
+        ":purec_scalar",
+        ":purecfma_scalar",
+        "//src/common:headers",
+    ],
+)
+
+filegroup(
+    name = "dispscalar_headers",
+    srcs = [":generate_renamedspscalar"],
+)
+
+genrule(
+    name = "generate_renamedspscalar",
+    outs = ["include/renamedspscalar.h"],
+    cmd = "$(location :mkrename) - 1 1 > $@",
+    tools = [":mkrename"],
+)
+
+genrule(
+    name = "generate_dispscalar",
+    srcs = [
+        "dispscalar.c.org",
+        "dispscalar_footer.c.org",
+    ],
+    outs = ["dispscalar.c"],
+    cmd = """
+$(location :mkdisp) 1 1 double float int32_t purec purecfma x > $(@D)/body
+cat $(location dispscalar.c.org) $(@D)/body \
+    $(location dispscalar_footer.c.org) > $@
+    """,
+    tools = [":mkdisp"],
+)
+
+implementation_library(
+    name = "purec_scalar",
+    mkrename_params = "cinz_ 1 1 purec",
+)
+
+implementation_library(
+    name = "purecfma_scalar",
+    copts = [
+        "-mavx2",
+        "-mfma",
+    ],
+    mkrename_params = "finz_ 1 1 purecfma",
+)
+
+# SSE dispatcher and instruction set implementations
+cc_library(
+    name = "dispsse",
+    srcs = [
+        "dispatcher.h",
+        ":generate_dispsse",
+        ":generate_sleef_header",
+    ],
+    copts = [
+        "-msse2",
+    ],
+    includes = [
+        ".",
+        "include",
+    ],
+    local_defines = ["ENABLE_AVX2"],
+    deps = [
+        ":avx2128",
+        ":sse2",
+        ":sse4",
+        "//src/common",
+        "//src/common:headers",
+    ],
+)
+
+genrule(
+    name = "generate_dispsse",
+    srcs = [
+        "dispsse.c.org",
+    ],
+    outs = ["dispsse.c"],
+    cmd = """
+$(location mkdisp) 2 4 __m128d __m128 __m128i sse2 sse4 avx2128 > $(@D)/body
+cat $(location dispsse.c.org) $(@D)/body > $@
+    """,
+    tools = [":mkdisp"],
+)
+
+implementation_library(
+    name = "sse2",
+    copts = ["-msse2"],
+    mkrename_params = "cinz_ 2 4 sse2",
+)
+
+implementation_library(
+    name = "sse4",
+    copts = ["-msse4.1"],
+    mkrename_params = "cinz_ 2 4 sse4",
+)
+
+implementation_library(
+    name = "avx2128",
+    copts = [
+        "-mavx2",
+        "-mfma",
+    ],
+    mkrename_params = "finz_ 2 4 avx2128",
 )

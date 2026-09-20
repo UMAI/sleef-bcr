@@ -11,6 +11,13 @@ cc_library(
 )
 
 cc_library(
+    name = "common",
+    srcs = ["common.c"],
+    visibility = ["//src/libm:__pkg__"],
+    deps = [":headers"],
+)
+
+cc_library(
     name = "testerutil",
     srcs = ["testerutil.c"],
     hdrs = ["testerutil.h"],

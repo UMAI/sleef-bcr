@@ -2,17 +2,28 @@ load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library")
 load(":implementation_library.bzl", "implementation_library")
 
 # Final library
+config_setting(
+    name = "x86_64",
+    constraint_values = ["@platforms//cpu:x86_64"],
+)
+
 cc_library(
-    name = "libm",
-    hdrs = [
-        ":generate_sleef_header",
-    ],
-    includes = ["include"],
-    visibility = ["//visibility:public"],
+    name = "libm_x86_64",
     deps = [
+        ":dispavx",
         ":dispscalar",
         ":dispsse",
     ],
+)
+
+cc_library(
+    name = "libm",
+    hdrs = [":generate_sleef_header"],
+    includes = ["include"],
+    visibility = ["//visibility:public"],
+    deps = select({
+        ":x86_64": [":libm_x86_64"],
+    }),
 )
 
 # Exposed header
@@ -31,20 +42,33 @@ sed \
     -e '/^#cmakedefine/d' \
     $(location sleeflibm_header.h.org.in) > $(@D)/header
 
+$(location :mkrename) - 1 1 double float int32_t int32_t __STDC__ \
+  > $(@D)/dsp
 $(location :mkrename) cinz_ 1 1 double float int32_t int32_t __STDC__ purec \
   > $(@D)/purec
 $(location :mkrename) finz_ 1 1 double float int32_t int32_t __STDC__ purecfma \
   > $(@D)/purecfma
-$(location :mkrename) - 1 1 double float int32_t int32_t __STDC__ \
-  > $(@D)/dsp
+$(location :mkrename) - 2 4 __m128d __m128 __m128i __m128i __SSE2__ \
+  > $(@D)/sse_generic
 $(location :mkrename) cinz_ 2 4 __m128d __m128 __m128i __m128i __SSE2__ sse2 \
   > $(@D)/sse2
 $(location :mkrename) cinz_ 2 4 __m128d __m128 __m128i __m128i __SSE2__ sse4 \
   > $(@D)/sse4
 $(location :mkrename) finz_ 2 4 __m128d __m128 __m128i __m128i __SSE2__ avx2128 \
   > $(@D)/avx2128
+$(location :mkrename) - 4 8 __m256d __m256 __m128i "struct { __m128i x, y; }" __AVX__ \
+  > $(@D)/avx_generic
+$(location :mkrename) cinz_ 4 8 __m256d __m256 __m128i "struct { __m128i x, y; }" __AVX__ avx \
+  > $(@D)/avx
+$(location :mkrename) finz_ 4 8 __m256d __m256 __m128i "struct { __m128i x, y; }" __AVX__ fma4 \
+  > $(@D)/fma4
+$(location :mkrename) finz_ 4 8 __m256d __m256 __m128i __m256i __AVX__ avx2 \
+  > $(@D)/avx2
 
-cat $(@D)/header $(@D)/purec $(@D)/purecfma $(@D)/dsp $(@D)/sse2 $(@D)/sse4 $(@D)/avx2128 \
+cat $(@D)/header \
+    $(@D)/dsp $(@D)/purec $(@D)/purecfma \
+    $(@D)/sse_generic $(@D)/sse2 $(@D)/sse4 $(@D)/avx2128 \
+    $(@D)/avx_generic $(@D)/avx $(@D)/fma4 $(@D)/avx2 \
     $(location sleeflibm_footer.h.org) > $@
     """,
     tools = [":mkrename"],
@@ -174,7 +198,7 @@ genrule(
     ],
     outs = ["dispsse.c"],
     cmd = """
-$(location mkdisp) 2 4 __m128d __m128 __m128i sse2 sse4 avx2128 > $(@D)/body
+$(location :mkdisp) 2 4 __m128d __m128 __m128i sse2 sse4 avx2128 > $(@D)/body
 cat $(location dispsse.c.org) $(@D)/body > $@
     """,
     tools = [":mkdisp"],
@@ -199,4 +223,66 @@ implementation_library(
         "-mfma",
     ],
     mkrename_params = "finz_ 2 4 avx2128",
+)
+
+# AVX dispatcher and instruction set implementations
+cc_library(
+    name = "dispavx",
+    srcs = [
+        "dispatcher.h",
+        ":generate_dispavx",
+        ":generate_sleef_header",
+    ],
+    copts = [
+        "-mavx",
+    ],
+    includes = [
+        ".",
+        "include",
+    ],
+    local_defines = [
+        "ENABLE_FMA4",
+        "ENABLE_AVX2",
+    ],
+    deps = [
+        ":avx",
+        ":avx2",
+        ":fma4",
+        "//src/common",
+        "//src/common:headers",
+    ],
+)
+
+genrule(
+    name = "generate_dispavx",
+    srcs = [
+        "dispavx.c.org",
+    ],
+    outs = ["dispavx.c"],
+    cmd = """
+$(location :mkdisp) 4 8 __m256d __m256 __m128i avx fma4 avx2 > $(@D)/body
+cat $(location dispavx.c.org) $(@D)/body > $@
+    """,
+    tools = [":mkdisp"],
+)
+
+implementation_library(
+    name = "avx",
+    copts = ["-mavx"],
+    mkrename_params = "cinz_ 4 8 avx",
+)
+
+implementation_library(
+    name = "fma4",
+    copts = ["-mfma4"],
+    mkrename_params = "finz_ 4 8 fma4",
+)
+
+implementation_library(
+    name = "avx2",
+    copts = [
+        "-mavx2",
+        "-mfma",
+    ],
+    mkrename_params = "finz_ 4 8 avx2",
 )

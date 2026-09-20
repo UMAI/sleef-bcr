@@ -209,3 +209,55 @@ cc_test(
         "//src/libm",
     ],
 )
+
+cc_test(
+    name = "tester3_avx512f",
+    srcs = ["tester3.c"],
+    args = ["$(location hash_finz.txt)"],
+    copts = [
+        "-ffp-contract=off",
+        "-mavx512f",
+        "-DSLEEF_USE_INTERNAL_SHA256=1",
+        "-DATR=finz_",
+        "-DDPTYPE=__m512d",
+        "-DSPTYPE=__m512",
+        "-DDPTYPESPEC=d8",
+        "-DSPTYPESPEC=f16",
+        "-DEXTSPEC=avx512f",
+    ],
+    data = ["hash_finz.txt"],
+    linkopts = ["-lm"],
+    linkstatic = True,
+    deps = [
+        "//src/common:feature_main",
+        "//src/common:psha2",
+        "//src/common:testerutil",
+        "//src/libm",
+    ],
+)
+
+cc_test(
+    name = "tester3_avx512fnofma",
+    srcs = ["tester3.c"],
+    args = ["$(location hash_cinz.txt)"],
+    copts = [
+        "-ffp-contract=off",
+        "-mavx512f",
+        "-DSLEEF_USE_INTERNAL_SHA256=1",
+        "-DATR=cinz_",
+        "-DDPTYPE=__m512d",
+        "-DSPTYPE=__m512",
+        "-DDPTYPESPEC=d8",
+        "-DSPTYPESPEC=f16",
+        "-DEXTSPEC=avx512fnofma",
+    ],
+    data = ["hash_cinz.txt"],
+    linkopts = ["-lm"],
+    linkstatic = True,
+    deps = [
+        "//src/common:feature_main",
+        "//src/common:psha2",
+        "//src/common:testerutil",
+        "//src/libm",
+    ],
+)

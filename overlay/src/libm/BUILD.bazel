@@ -10,6 +10,8 @@ config_setting(
 cc_library(
     name = "libm_x86_64",
     deps = [
+        ":avx512f",
+        ":avx512fnofma",
         ":dispavx",
         ":dispscalar",
         ":dispsse",
@@ -64,11 +66,18 @@ $(location :mkrename) finz_ 4 8 __m256d __m256 __m128i "struct { __m128i x, y; }
   > $(@D)/fma4
 $(location :mkrename) finz_ 4 8 __m256d __m256 __m128i __m256i __AVX__ avx2 \
   > $(@D)/avx2
+$(location :mkrename) - 8 16 __m512d __m512 __m256i __m512i __AVX512F__ \
+  > $(@D)/avx512_generic
+$(location :mkrename) finz_ 8 16 __m512d __m512 __m256i __m512i __AVX512F__ avx512f \
+  > $(@D)/avx512f
+$(location :mkrename) cinz_ 8 16 __m512d __m512 __m256i __m512i __AVX512F__ avx512fnofma \
+  > $(@D)/avx512fnofma
 
 cat $(@D)/header \
     $(@D)/dsp $(@D)/purec $(@D)/purecfma \
     $(@D)/sse_generic $(@D)/sse2 $(@D)/sse4 $(@D)/avx2128 \
     $(@D)/avx_generic $(@D)/avx $(@D)/fma4 $(@D)/avx2 \
+    $(@D)/avx512_generic $(@D)/avx512f $(@D)/avx512fnofma \
     $(location sleeflibm_footer.h.org) > $@
     """,
     tools = [":mkrename"],
@@ -88,6 +97,14 @@ cc_binary(
     srcs = [
         "funcproto.h",
         "mkdisp.c",
+    ],
+)
+
+cc_binary(
+    name = "mkalias",
+    srcs = [
+        "funcproto.h",
+        "mkalias.c",
     ],
 )
 
@@ -285,4 +302,33 @@ implementation_library(
         "-mfma",
     ],
     mkrename_params = "finz_ 4 8 avx2",
+)
+
+# AVX512 implementations
+genrule(
+    name = "generate_alias_avx512f",
+    outs = ["include/alias_avx512f.h"],
+    cmd = """
+$(location :mkalias) -16 __m512 __m512i e avx512f > $@
+$(location :mkalias) 8 __m512d __m256i e avx512f >> $@
+    """,
+    tools = [":mkalias"],
+)
+
+implementation_library(
+    name = "avx512f",
+    additional_defines = ['ALIAS_NO_EXT_SUFFIX=\\"alias_avx512f.h\\"'],
+    additional_srcs = [":generate_alias_avx512f"],
+    copts = [
+        "-mavx512f",
+    ],
+    mkrename_params = "finz_ 8 16 avx512f",
+)
+
+implementation_library(
+    name = "avx512fnofma",
+    copts = [
+        "-mavx512f",
+    ],
+    mkrename_params = "cinz_ 8 16 avx512fnofma",
 )

@@ -1,6 +1,12 @@
 load("@rules_cc//cc:defs.bzl", "cc_library")
 
-def _implementation_library(name, visibility, mkrename_params, copts):
+def _implementation_library(
+        name,
+        visibility,
+        mkrename_params,
+        copts,
+        additional_srcs,
+        additional_defines):
     native.genrule(
         name = name + "_generated_rename",
         outs = ["include/rename%s.h" % name],
@@ -13,7 +19,7 @@ def _implementation_library(name, visibility, mkrename_params, copts):
         srcs = [
             "//src/libm:simd_sources",
             ":%s_generated_rename" % name,
-        ],
+        ] + additional_srcs,
         copts = copts,
         includes = [
             ".",
@@ -22,7 +28,7 @@ def _implementation_library(name, visibility, mkrename_params, copts):
         local_defines = [
             "DORENAME",
             "ENABLE_%s" % name.upper(),
-        ],
+        ] + additional_defines,
         deps = [
             "//src/libm:rempitab",
             "//src/arch:headers",
@@ -36,7 +42,7 @@ def _implementation_library(name, visibility, mkrename_params, copts):
         srcs = [
             "//src/libm:simd_sources",
             ":%s_generated_rename" % name,
-        ],
+        ] + additional_srcs,
         copts = copts,
         includes = [
             ".",
@@ -46,7 +52,7 @@ def _implementation_library(name, visibility, mkrename_params, copts):
             "DORENAME",
             "ENABLE_%s" % name.upper(),
             "DETERMINISTIC=1",
-        ],
+        ] + additional_defines,
         deps = [
             "//src/libm:rempitab",
             "//src/arch:headers",
@@ -67,6 +73,8 @@ implementation_library = macro(
     attrs = {
         "mkrename_params": attr.string(mandatory = True, configurable = False),
         "copts": attr.string_list(mandatory = False, configurable = False, default = []),
+        "additional_srcs": attr.label_list(mandatory = False, configurable = False, default = []),
+        "additional_defines": attr.string_list(mandatory = False, configurable = False, default = []),
     },
     implementation = _implementation_library,
 )

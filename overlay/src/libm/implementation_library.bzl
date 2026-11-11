@@ -20,7 +20,9 @@ def _implementation_library(
             "//src/libm:simd_sources",
             ":%s_generated_rename" % name,
         ] + additional_srcs,
-        copts = copts,
+        copts = [
+            "-ffp-contract=off",
+        ] + copts,
         includes = [
             ".",
             "include",
@@ -43,7 +45,9 @@ def _implementation_library(
             "//src/libm:simd_sources",
             ":%s_generated_rename" % name,
         ] + additional_srcs,
-        copts = copts,
+        copts = [
+            "-ffp-contract=off",
+        ] + copts,
         includes = [
             ".",
             "include",
@@ -72,7 +76,7 @@ def _implementation_library(
 implementation_library = macro(
     attrs = {
         "mkrename_params": attr.string(mandatory = True, configurable = False),
-        "copts": attr.string_list(mandatory = False, configurable = False, default = []),
+        "copts": attr.string_list(mandatory = False, configurable = True, default = []),
         "additional_srcs": attr.label_list(mandatory = False, configurable = False, default = []),
         "additional_defines": attr.string_list(mandatory = False, configurable = False, default = []),
     },

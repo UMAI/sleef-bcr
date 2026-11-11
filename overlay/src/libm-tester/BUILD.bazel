@@ -261,3 +261,105 @@ cc_test(
         "//src/libm",
     ],
 )
+
+cc_test(
+    name = "tester3_advsimd",
+    srcs = ["tester3.c"],
+    args = ["$(location hash_finz.txt)"],
+    copts = [
+        "-ffp-contract=off",
+        "-DSLEEF_USE_INTERNAL_SHA256=1",
+        "-DATR=finz_",
+        "-DDPTYPE=float64x2_t",
+        "-DSPTYPE=float32x4_t",
+        "-DDPTYPESPEC=d2",
+        "-DSPTYPESPEC=f4",
+        "-DEXTSPEC=advsimd",
+    ],
+    data = ["hash_finz.txt"],
+    linkopts = ["-lm"],
+    linkstatic = True,
+    deps = [
+        "//src/common:feature_main",
+        "//src/common:psha2",
+        "//src/common:testerutil",
+        "//src/libm",
+    ],
+)
+
+cc_test(
+    name = "tester3_advsimdnofma",
+    srcs = ["tester3.c"],
+    args = ["$(location hash_cinz.txt)"],
+    copts = [
+        "-ffp-contract=off",
+        "-DSLEEF_USE_INTERNAL_SHA256=1",
+        "-DATR=cinz_",
+        "-DDPTYPE=float64x2_t",
+        "-DSPTYPE=float32x4_t",
+        "-DDPTYPESPEC=d2",
+        "-DSPTYPESPEC=f4",
+        "-DEXTSPEC=advsimdnofma",
+    ],
+    data = ["hash_cinz.txt"],
+    linkopts = ["-lm"],
+    linkstatic = True,
+    deps = [
+        "//src/common:feature_main",
+        "//src/common:psha2",
+        "//src/common:testerutil",
+        "//src/libm",
+    ],
+)
+
+cc_test(
+    name = "tester3_sve",
+    srcs = ["tester3.c"],
+    args = ["$(location hash_finz.txt)"],
+    copts = [
+        "-march=armv8-a+sve",
+        "-ffp-contract=off",
+        "-DSLEEF_USE_INTERNAL_SHA256=1",
+        "-DATR=finz_",
+        "-DDPTYPE=svfloat64_t",
+        "-DSPTYPE=svfloat32_t",
+        "-DDPTYPESPEC=dx",
+        "-DSPTYPESPEC=fx",
+        "-DEXTSPEC=sve",
+    ],
+    data = ["hash_finz.txt"],
+    linkopts = ["-lm"],
+    linkstatic = True,
+    deps = [
+        "//src/common:feature_main",
+        "//src/common:psha2",
+        "//src/common:testerutil",
+        "//src/libm",
+    ],
+)
+
+cc_test(
+    name = "tester3_svenofma",
+    srcs = ["tester3.c"],
+    args = ["$(location hash_cinz.txt)"],
+    copts = [
+        "-march=armv8-a+sve",
+        "-ffp-contract=off",
+        "-DSLEEF_USE_INTERNAL_SHA256=1",
+        "-DATR=cinz_",
+        "-DDPTYPE=svfloat64_t",
+        "-DSPTYPE=svfloat32_t",
+        "-DDPTYPESPEC=dx",
+        "-DSPTYPESPEC=fx",
+        "-DEXTSPEC=svenofma",
+    ],
+    data = ["hash_cinz.txt"],
+    linkopts = ["-lm"],
+    linkstatic = True,
+    deps = [
+        "//src/common:feature_main",
+        "//src/common:psha2",
+        "//src/common:testerutil",
+        "//src/libm",
+    ],
+)

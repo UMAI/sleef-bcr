@@ -7,6 +7,11 @@ config_setting(
     constraint_values = ["@platforms//cpu:x86_64"],
 )
 
+config_setting(
+    name = "aarch64",
+    constraint_values = ["@platforms//cpu:aarch64"],
+)
+
 cc_library(
     name = "libm_x86_64",
     deps = [
@@ -19,13 +24,27 @@ cc_library(
 )
 
 cc_library(
+    name = "libm_aarch64",
+    deps = [
+        ":advsimd",
+        ":advsimdnofma",
+        ":dispscalar",
+        ":sve",
+        ":svenofma",
+    ],
+)
+
+cc_library(
     name = "libm",
     hdrs = [":generate_sleef_header"],
     includes = ["include"],
     visibility = ["//visibility:public"],
     deps = select({
         ":x86_64": [":libm_x86_64"],
-    }),
+        ":aarch64": [":libm_aarch64"],
+    }) + [
+        ":sleefld",
+    ],
 )
 
 # Exposed header
@@ -72,12 +91,24 @@ $(location :mkrename) finz_ 8 16 __m512d __m512 __m256i __m512i __AVX512F__ avx5
   > $(@D)/avx512f
 $(location :mkrename) cinz_ 8 16 __m512d __m512 __m256i __m512i __AVX512F__ avx512fnofma \
   > $(@D)/avx512fnofma
+$(location :mkrename) - 2 4 float64x2_t float32x4_t int32x2_t int32x4_t __ARM_NEON \
+  > $(@D)/adv_generic
+$(location :mkrename) finz_ 2 4 float64x2_t float32x4_t int32x2_t int32x4_t __ARM_NEON advsimd \
+  > $(@D)/advsimd
+$(location :mkrename) cinz_ 2 4 float64x2_t float32x4_t int32x2_t int32x4_t __ARM_NEON advsimdnofma \
+  > $(@D)/advsimdnofma
+$(location :mkrename) finz_ x x svfloat64_t svfloat32_t svint32_t svint32_t __ARM_FEATURE_SVE sve \
+  > $(@D)/sve
+$(location :mkrename) cinz_ x x svfloat64_t svfloat32_t svint32_t svint32_t __ARM_FEATURE_SVE svenofma \
+  > $(@D)/svenofma
 
 cat $(@D)/header \
     $(@D)/dsp $(@D)/purec $(@D)/purecfma \
     $(@D)/sse_generic $(@D)/sse2 $(@D)/sse4 $(@D)/avx2128 \
     $(@D)/avx_generic $(@D)/avx $(@D)/fma4 $(@D)/avx2 \
     $(@D)/avx512_generic $(@D)/avx512f $(@D)/avx512fnofma \
+    $(@D)/adv_generic $(@D)/advsimd $(@D)/advsimdnofma \
+    $(@D)/sve $(@D)/svenofma \
     $(location sleeflibm_footer.h.org) > $@
     """,
     tools = [":mkrename"],
@@ -176,10 +207,13 @@ implementation_library(
 
 implementation_library(
     name = "purecfma_scalar",
-    copts = [
-        "-mavx2",
-        "-mfma",
-    ],
+    copts = select({
+        ":x86_64": [
+            "-mavx2",
+            "-mfma",
+        ],
+        ":aarch64": [],
+    }),
     mkrename_params = "finz_ 1 1 purecfma",
 )
 
@@ -331,4 +365,58 @@ implementation_library(
         "-mavx512f",
     ],
     mkrename_params = "cinz_ 8 16 avx512fnofma",
+)
+
+# ADV (AArch64) implementations
+genrule(
+    name = "generate_alias_advsimd",
+    outs = ["include/alias_advsimd.h"],
+    cmd = """
+$(location :mkalias) 2 float64x2_t int32x2_t n advsimd > $@
+$(location :mkalias) -4 float32x4_t int32x4_t n advsimd >> $@
+    """,
+    tools = [":mkalias"],
+)
+
+implementation_library(
+    name = "advsimd",
+    additional_defines = ['ALIAS_NO_EXT_SUFFIX=\\"alias_advsimd.h\\"'],
+    additional_srcs = [":generate_alias_advsimd"],
+    mkrename_params = "finz_ 2 4 advsimd",
+)
+
+implementation_library(
+    name = "advsimdnofma",
+    mkrename_params = "cinz_ 2 4 advsimdnofma",
+)
+
+# SVE (AArch64) implementations
+implementation_library(
+    name = "sve",
+    copts = ["-march=armv8-a+sve"],
+    mkrename_params = "finz_ x x sve",
+)
+
+implementation_library(
+    name = "svenofma",
+    copts = ["-march=armv8-a+sve"],
+    mkrename_params = "cinz_ x x svenofma",
+)
+
+# long double functions
+cc_library(
+    name = "sleefld",
+    srcs = [
+        "rename.h",
+        "sleefld.c",
+    ],
+    copts = [
+        "-ffp-contract=off",
+    ],
+    local_defines = [
+        "DORENAME",
+    ],
+    deps = [
+        "//src/common:headers",
+    ],
 )

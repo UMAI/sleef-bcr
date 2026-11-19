@@ -1,0 +1,187 @@
+load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
+
+_OPENMP_ENV = {
+    "OMP_DYNAMIC": "FALSE",
+    "OMP_NUM_THREADS": "2",
+    "OMP_THREAD_LIMIT": "2",
+}
+
+_TEST_DEPS = [
+    "//src/common:headers",
+    "//src/dft",
+    "//src/libm",
+]
+
+_LINKAGES = [
+    ("", []),
+    (
+        "_shared",
+        [
+            "//src/dft:dft_shared",
+            "//src/libm:sleef_shared",
+        ],
+    ),
+]
+
+_PRECISIONS = [
+    ("dp", 1),
+    ("sp", 2),
+]
+
+_SINGLE_THREADED = ["MODE=(SLEEF_MODE_DEBUG|SLEEF_MODE_VERBOSE|SLEEF_MODE_NO_MT)"]
+
+# Arguments are log2(transform length). Retain the existing 32-point target
+# names and add the other sizes registered by CMake's reference tests.
+_REFERENCE_CASES = [
+    (
+        "",
+        ["5"],
+        [],
+    ),
+    (
+        "_1",
+        ["1"],
+        [],
+    ),
+    (
+        "_2",
+        ["2"],
+        [],
+    ),
+    (
+        "_3",
+        ["3"],
+        [],
+    ),
+    (
+        "_4",
+        ["4"],
+        [],
+    ),
+    (
+        "_10",
+        ["10"],
+        [],
+    ),
+]
+
+# Cover multiple butterfly stages, small and rectangular 2D transforms, and
+# the blocked transpose used by larger transforms. Upstream defaults allow
+# threading; explicit NO_MT cases also exercise the serial execution paths.
+_ROUNDTRIP_1D_CASES = [
+    (
+        "",
+        ["10"],
+        [],
+    ),
+    (
+        "_16",
+        ["16"],
+        [],
+    ),
+    (
+        "_no_mt",
+        ["10"],
+        _SINGLE_THREADED,
+    ),
+]
+
+_ROUNDTRIP_2D_CASES = [
+    (
+        "",
+        [
+            "5",
+            "6",
+        ],
+        [],
+    ),
+    (
+        "_2_3",
+        [
+            "2",
+            "3",
+        ],
+        [],
+    ),
+    (
+        "_8_8",
+        [
+            "8",
+            "8",
+        ],
+        [],
+    ),
+    (
+        "_no_mt",
+        [
+            "5",
+            "6",
+        ],
+        _SINGLE_THREADED,
+    ),
+]
+
+[
+    cc_test(
+        name = family + precision + case_suffix + link_suffix,
+        size = "small",
+        srcs = [source],
+        args = arguments,
+        dynamic_deps = dynamic_libraries,
+        env = _OPENMP_ENV,
+        linkopts = ["-lm"],
+        linkstatic = True,
+        local_defines = ["BASETYPEID=%d" % base_type] + mode_defines,
+        deps = _TEST_DEPS,
+    )
+    for family, source, cases in [
+        ("naivetest", "naivetest.c", _REFERENCE_CASES),
+        ("roundtriptest1d", "roundtriptest1d.c", _ROUNDTRIP_1D_CASES),
+        ("roundtriptest2d", "roundtriptest2d.c", _ROUNDTRIP_2D_CASES),
+    ]
+    for precision, base_type in _PRECISIONS
+    for case_suffix, arguments, mode_defines in cases
+    for link_suffix, dynamic_libraries in _LINKAGES
+]
+
+# Rename only the upstream planner's main function, letting a test launcher
+# put all plan files (including the hard-coded manual.plan) in TEST_TMPDIR.
+[
+    cc_library(
+        name = name + "_body",
+        testonly = True,
+        srcs = ["test_dftplanner.cpp"],
+        linkstatic = True,
+        local_defines = ["main=sleef_dftplanner_main"] + mode_defines,
+        deps = _TEST_DEPS,
+    )
+    for name, mode_defines in [
+        (
+            "test_dftplanner",
+            ["MEASURE=1"],
+        ),
+        ("test_dftplannerest", []),
+    ]
+]
+
+[
+    cc_test(
+        name = name + link_suffix,
+        size = "medium",
+        srcs = ["planner_test_main.cc"],
+        args = [
+            "first.plan",
+            "second.plan",
+        ],
+        dynamic_deps = dynamic_libraries,
+        env = _OPENMP_ENV,
+        linkopts = ["-lm"],
+        linkstatic = True,
+        deps = [":" + name + "_body"] + _TEST_DEPS,
+    )
+    for name in [
+        "test_dftplanner",
+        "test_dftplannerest",
+    ]
+    for link_suffix, dynamic_libraries in _LINKAGES
+]

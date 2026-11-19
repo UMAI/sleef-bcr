@@ -1,5 +1,59 @@
 load("@rules_cc//cc:defs.bzl", "cc_test")
 
+# Exercise the same reference hashes against the assembled shared library.
+cc_test(
+    name = "tester3_purec_scalar_shared",
+    srcs = ["tester3.c"],
+    args = ["$(location hash_cinz.txt)"],
+    copts = [
+        "-ffp-contract=off",
+        "-DSLEEF_USE_INTERNAL_SHA256=1",
+        "-DATR=cinz_",
+        "-DDPTYPE=double",
+        "-DSPTYPE=float",
+        "-DDPTYPESPEC=d1",
+        "-DSPTYPESPEC=f1",
+        "-DEXTSPEC=purec",
+    ],
+    data = ["hash_cinz.txt"],
+    dynamic_deps = ["//src/libm:sleef_shared"],
+    linkopts = ["-lm"],
+    linkstatic = True,
+    deps = [
+        "//src/common:feature_main",
+        "//src/common:psha2",
+        "//src/common:testerutil",
+        "//src/libm",
+    ],
+)
+
+cc_test(
+    name = "tester3_sse2_shared",
+    srcs = ["tester3.c"],
+    args = ["$(location hash_cinz.txt)"],
+    copts = [
+        "-ffp-contract=off",
+        "-msse2",
+        "-DSLEEF_USE_INTERNAL_SHA256=1",
+        "-DATR=cinz_",
+        "-DDPTYPE=__m128d",
+        "-DSPTYPE=__m128",
+        "-DDPTYPESPEC=d2",
+        "-DSPTYPESPEC=f4",
+        "-DEXTSPEC=sse2",
+    ],
+    data = ["hash_cinz.txt"],
+    dynamic_deps = ["//src/libm:sleef_shared"],
+    linkopts = ["-lm"],
+    linkstatic = True,
+    deps = [
+        "//src/common:feature_main",
+        "//src/common:psha2",
+        "//src/common:testerutil",
+        "//src/libm",
+    ],
+)
+
 cc_test(
     name = "tester3_purec_scalar",
     srcs = ["tester3.c"],

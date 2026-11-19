@@ -27,6 +27,7 @@ def _implementation_library(
             ".",
             "include",
         ],
+        linkstatic = True,
         local_defines = [
             "DORENAME",
             "ENABLE_%s" % name.upper(),
@@ -52,6 +53,7 @@ def _implementation_library(
             ".",
             "include",
         ],
+        linkstatic = True,
         local_defines = [
             "DORENAME",
             "ENABLE_%s" % name.upper(),

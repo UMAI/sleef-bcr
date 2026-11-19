@@ -1,5 +1,28 @@
-load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library")
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_shared_library")
 load(":implementation_library.bzl", "implementation_library")
+
+_SCALAR_IMPLEMENTATIONS = [
+    ":purec_scalar",
+    ":purecfma_scalar",
+]
+
+_X86_64_IMPLEMENTATIONS = _SCALAR_IMPLEMENTATIONS + [
+    ":avx",
+    ":avx2",
+    ":avx2128",
+    ":avx512f",
+    ":avx512fnofma",
+    ":fma4",
+    ":sse2",
+    ":sse4",
+]
+
+_AARCH64_IMPLEMENTATIONS = _SCALAR_IMPLEMENTATIONS + [
+    ":advsimd",
+    ":advsimdnofma",
+    ":sve",
+    ":svenofma",
+]
 
 # Final library
 config_setting(
@@ -12,11 +35,14 @@ config_setting(
     constraint_values = ["@platforms//cpu:aarch64"],
 )
 
+config_setting(
+    name = "linux",
+    constraint_values = ["@platforms//os:linux"],
+)
+
 cc_library(
     name = "libm_x86_64",
-    deps = [
-        ":avx512f",
-        ":avx512fnofma",
+    deps = _X86_64_IMPLEMENTATIONS + [
         ":dispavx",
         ":dispscalar",
         ":dispsse",
@@ -25,12 +51,8 @@ cc_library(
 
 cc_library(
     name = "libm_aarch64",
-    deps = [
-        ":advsimd",
-        ":advsimdnofma",
+    deps = _AARCH64_IMPLEMENTATIONS + [
         ":dispscalar",
-        ":sve",
-        ":svenofma",
     ],
 )
 
@@ -38,6 +60,7 @@ cc_library(
     name = "libm",
     hdrs = [":generate_sleef_header"],
     includes = ["include"],
+    linkopts = ["-lm"],
     visibility = ["//visibility:public"],
     deps = select({
         ":x86_64": [":libm_x86_64"],
@@ -45,6 +68,52 @@ cc_library(
     }) + [
         ":sleefld",
     ],
+)
+
+# Combine implementations and their hidden argument-reduction tables in one
+# shared library. DFT also uses the common utilities provided by this library.
+cc_shared_library(
+    name = "sleef_shared",
+    shared_lib_name = select({
+        ":linux": "libsleef.so.3",
+        "//conditions:default": "libsleef.so",
+    }),
+    user_link_flags = ["-lm"] + select({
+        ":linux": ["-Wl,-soname,libsleef.so.3"],
+        "//conditions:default": [],
+    }),
+    visibility = ["//visibility:public"],
+    # Direct roots are retained in full, including deterministic entry points
+    # not referenced by dispatchers. Keep this policy local to shared linkage.
+    deps = [
+        ":libm",
+        "//src/common",
+    ] + select({
+        ":x86_64": _X86_64_IMPLEMENTATIONS,
+        ":aarch64": _AARCH64_IMPLEMENTATIONS,
+    }),
+)
+
+# Standalone consumers can use either the linker name or the full version.
+genrule(
+    name = "sleef_shared_aliases",
+    srcs = [":sleef_shared"],
+    outs = [
+        "libsleef.so",
+        "libsleef.so.3.9.0",
+    ],
+    cmd = "ln -sf libsleef.so.3 $(@D)/libsleef.so && ln -sf libsleef.so.3 $(@D)/libsleef.so.3.9.0",
+    target_compatible_with = ["@platforms//os:linux"],
+)
+
+filegroup(
+    name = "sleef_shared_files",
+    srcs = [
+        ":sleef_shared",
+        ":sleef_shared_aliases",
+    ],
+    target_compatible_with = ["@platforms//os:linux"],
+    visibility = ["//visibility:public"],
 )
 
 # Exposed header
@@ -143,6 +212,7 @@ cc_binary(
 cc_library(
     name = "rempitab",
     srcs = ["rempitab.c"],
+    linkstatic = True,
     deps = ["//src/common:headers"],
 )
 
@@ -166,6 +236,7 @@ cc_library(
         ".",
         "include",
     ],
+    linkstatic = True,
     deps = [
         ":purec_scalar",
         ":purecfma_scalar",
@@ -193,9 +264,9 @@ genrule(
     ],
     outs = ["dispscalar.c"],
     cmd = """
-$(location :mkdisp) 1 1 double float int32_t purec purecfma x > $(@D)/body
-cat $(location dispscalar.c.org) $(@D)/body \
-    $(location dispscalar_footer.c.org) > $@
+cat $(location dispscalar.c.org) > $@
+$(location :mkdisp) 1 1 double float int32_t purec purecfma x >> $@
+cat $(location dispscalar_footer.c.org) >> $@
     """,
     tools = [":mkdisp"],
 )
@@ -232,6 +303,7 @@ cc_library(
         ".",
         "include",
     ],
+    linkstatic = True,
     local_defines = ["ENABLE_AVX2"],
     deps = [
         ":avx2128",
@@ -249,8 +321,8 @@ genrule(
     ],
     outs = ["dispsse.c"],
     cmd = """
-$(location :mkdisp) 2 4 __m128d __m128 __m128i sse2 sse4 avx2128 > $(@D)/body
-cat $(location dispsse.c.org) $(@D)/body > $@
+cat $(location dispsse.c.org) > $@
+$(location :mkdisp) 2 4 __m128d __m128 __m128i sse2 sse4 avx2128 >> $@
     """,
     tools = [":mkdisp"],
 )
@@ -291,6 +363,7 @@ cc_library(
         ".",
         "include",
     ],
+    linkstatic = True,
     local_defines = [
         "ENABLE_FMA4",
         "ENABLE_AVX2",
@@ -311,8 +384,8 @@ genrule(
     ],
     outs = ["dispavx.c"],
     cmd = """
-$(location :mkdisp) 4 8 __m256d __m256 __m128i avx fma4 avx2 > $(@D)/body
-cat $(location dispavx.c.org) $(@D)/body > $@
+cat $(location dispavx.c.org) > $@
+$(location :mkdisp) 4 8 __m256d __m256 __m128i avx fma4 avx2 >> $@
     """,
     tools = [":mkdisp"],
 )
@@ -413,6 +486,7 @@ cc_library(
     copts = [
         "-ffp-contract=off",
     ],
+    linkstatic = True,
     local_defines = [
         "DORENAME",
     ],

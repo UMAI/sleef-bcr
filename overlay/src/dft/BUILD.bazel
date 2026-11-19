@@ -1,0 +1,335 @@
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_shared_library")
+load(":compiler_options.bzl", "DFT_COPTS", "compiler_options")
+load(":dft_kernel.bzl", "dft_kernel")
+
+# Use the same backend lists for linking and dispatch-table generation.
+_DP_KERNELS = {
+    ":x86_64": [
+        "purecdp",
+        "sse2dp",
+        "avx2dp",
+        "avx512fdp",
+    ],
+    ":aarch64": [
+        "purecdp",
+        "advsimddp",
+        "sve256dp",
+        "sve512dp",
+        "sve1024dp",
+        "sve2048dp",
+    ],
+    "//conditions:default": ["purecdp"],
+}
+
+_SP_KERNELS = {
+    ":x86_64": [
+        "purecsp",
+        "sse2sp",
+        "avx2sp",
+        "avx512fsp",
+    ],
+    ":aarch64": [
+        "purecsp",
+        "advsimdsp",
+        "sve256sp",
+        "sve512sp",
+        "sve1024sp",
+        "sve2048sp",
+    ],
+    "//conditions:default": ["purecsp"],
+}
+
+# Match CMake's larger butterflies when SVE kernels are included.
+_MAX_BUTTERFLY_WIDTH = {
+    ":x86_64": 4,
+    ":aarch64": 6,
+    "//conditions:default": 4,
+}
+
+_BUTTERFLY_DEFINES = select({
+    condition: ["MAXBUTWIDTH%s=%d" % (precision, width) for precision in [
+        "DP",
+        "SP",
+    ]]
+    for condition, width in _MAX_BUTTERFLY_WIDTH.items()
+})
+
+# Float/double DFT planning and execution engine. OpenMP is supplied
+# by the selected compiler toolchain (libgomp with GCC, libomp with Clang).
+cc_library(
+    name = "dft",
+    srcs = [
+        "compat.h",
+        "dft.cpp",
+        "dftcommon.cpp",
+        "dftcommon.hpp",
+        "serializer.hpp",
+        ":generate_dispatchdp",
+        ":generate_dispatchparam",
+        ":generate_dispatchsp",
+    ],
+    copts = DFT_COPTS,
+    includes = ["."],
+    linkopts = [
+        "-fopenmp",
+        "-lm",
+    ],
+    linkstatic = True,
+    local_defines = [
+        "ENABLE_STREAM=0",
+        "MAXSHIFTDP=1",
+        "MAXSHIFTSP=1",
+        "MINSHIFTDP=1",
+        "MINSHIFTSP=1",
+    ] + _BUTTERFLY_DEFINES,
+    toolchains = [":compiler_options"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//include:sleefdft_headers",
+        "//src/common",
+        "//src/common:headers",
+        "//src/libm",
+    ] + select({
+        condition: [":" + kernel for kernel in dp + _SP_KERNELS[condition]]
+        for condition, dp in _DP_KERNELS.items()
+    }),
+)
+
+cc_shared_library(
+    name = "dft_shared",
+    dynamic_deps = ["//src/libm:sleef_shared"],
+    shared_lib_name = select({
+        ":linux": "libsleefdft.so.3",
+        "//conditions:default": "libsleefdft.so",
+    }),
+    user_link_flags = select({
+        ":linux": ["-Wl,-soname,libsleefdft.so.3"],
+        "//conditions:default": [],
+    }),
+    visibility = ["//visibility:public"],
+    deps = [":dft"],
+)
+
+# Keep Bazel's runtime file at the SONAME, with standalone distribution aliases.
+genrule(
+    name = "dft_shared_aliases",
+    srcs = [":dft_shared"],
+    outs = [
+        "libsleefdft.so",
+        "libsleefdft.so.3.9.0",
+    ],
+    cmd = "ln -sf libsleefdft.so.3 $(@D)/libsleefdft.so && ln -sf libsleefdft.so.3 $(@D)/libsleefdft.so.3.9.0",
+    target_compatible_with = ["@platforms//os:linux"],
+)
+
+filegroup(
+    name = "dft_shared_files",
+    srcs = [
+        ":dft_shared",
+        ":dft_shared_aliases",
+    ],
+    target_compatible_with = ["@platforms//os:linux"],
+    visibility = ["//visibility:public"],
+)
+
+compiler_options(name = "compiler_options")
+
+# Match CMake's default: generate non-streaming configurations 0 and 2.
+cc_binary(
+    name = "mkdispatch",
+    srcs = ["mkdispatch.c"],
+    local_defines = ["ENABLE_STREAM=0"],
+)
+
+cc_binary(
+    name = "mkunroll",
+    srcs = ["mkunroll.c"],
+    local_defines = ["ENABLE_STREAM=0"],
+)
+
+# Float/double kernels, architecture-dependent butterfly widths, no fixed-shift
+# specializations (CMake's default minimum and maximum shift are both 1).
+genrule(
+    name = "generate_dispatchparam",
+    outs = ["dispatchparam.h"],
+    cmd = select({
+        condition: "$(execpath :mkdispatch) paramonly ALL %d 1 1 %s > $@" % (
+            _MAX_BUTTERFLY_WIDTH[condition],
+            " ".join(kernels),
+        )
+        for condition, kernels in _SP_KERNELS.items()
+    }),
+    tools = [":mkdispatch"],
+)
+
+genrule(
+    name = "generate_dispatchdp",
+    outs = ["dispatchdp.hpp"],
+    cmd = select({
+        condition: "$(execpath :mkdispatch) double DP %d 1 1 %s > $@" % (
+            _MAX_BUTTERFLY_WIDTH[condition],
+            " ".join(kernels),
+        )
+        for condition, kernels in _DP_KERNELS.items()
+    }),
+    tools = [":mkdispatch"],
+)
+
+genrule(
+    name = "generate_dispatchsp",
+    outs = ["dispatchsp.hpp"],
+    cmd = select({
+        condition: "$(execpath :mkdispatch) float SP %d 1 1 %s > $@" % (
+            _MAX_BUTTERFLY_WIDTH[condition],
+            " ".join(kernels),
+        )
+        for condition, kernels in _SP_KERNELS.items()
+    }),
+    tools = [":mkdispatch"],
+)
+
+# Source groups also make the inputs explicit to the symbolic macro.
+filegroup(
+    name = "unroll_template",
+    srcs = ["unroll0.cpp.in"],
+)
+
+filegroup(
+    name = "kernel_headers",
+    srcs = ["vectortype.hpp"],
+)
+
+filegroup(
+    name = "generated_scalar_sources",
+    srcs = [
+        ":generate_dispatchdp",
+        ":generate_dispatchparam",
+        ":generate_dispatchsp",
+        ":purecdp_generate_unroll",
+        ":purecsp_generate_unroll",
+    ],
+)
+
+config_setting(
+    name = "x86_64",
+    constraint_values = ["@platforms//cpu:x86_64"],
+)
+
+config_setting(
+    name = "aarch64",
+    constraint_values = ["@platforms//cpu:aarch64"],
+)
+
+config_setting(
+    name = "linux",
+    constraint_values = ["@platforms//os:linux"],
+)
+
+# CONFIG selects the helper layout; it is independent of the generated
+# kernel variants (the 0 and 2 suffixes).
+dft_kernel(
+    name = "purecdp",
+    config = 1,
+    enable = "PUREC",
+    local_defines = _BUTTERFLY_DEFINES,
+    precision = "dp",
+)
+
+dft_kernel(
+    name = "purecsp",
+    config = 1,
+    enable = "PUREC",
+    local_defines = _BUTTERFLY_DEFINES,
+    precision = "sp",
+)
+
+# Preserve CMake's names: these SSE2-helper kernels use the SSE4.1 layout.
+dft_kernel(
+    name = "sse2dp",
+    config = 4,
+    copts = ["-msse4.1"],
+    enable = "SSE2",
+    local_defines = _BUTTERFLY_DEFINES,
+    precision = "dp",
+    target_compatible_with = ["@platforms//cpu:x86_64"],
+)
+
+dft_kernel(
+    name = "sse2sp",
+    config = 4,
+    copts = ["-msse4.1"],
+    enable = "SSE2",
+    local_defines = _BUTTERFLY_DEFINES,
+    precision = "sp",
+    target_compatible_with = ["@platforms//cpu:x86_64"],
+)
+
+[
+    dft_kernel(
+        name = backend + precision,
+        config = 1,
+        copts = flags,
+        enable = enable,
+        local_defines = _BUTTERFLY_DEFINES,
+        precision = precision,
+        target_compatible_with = ["@platforms//cpu:x86_64"],
+    )
+    for backend, enable, flags in [
+        (
+            "avx2",
+            "AVX2",
+            [
+                "-mavx2",
+                "-mfma",
+            ],
+        ),
+        (
+            "avx512f",
+            "AVX512F",
+            ["-mavx512f"],
+        ),
+    ]
+    for precision in [
+        "dp",
+        "sp",
+    ]
+]
+
+[
+    dft_kernel(
+        name = "advsimd" + precision,
+        config = 1,
+        enable = "ADVSIMD",
+        local_defines = _BUTTERFLY_DEFINES,
+        precision = precision,
+        target_compatible_with = ["@platforms//cpu:aarch64"],
+    )
+    for precision in [
+        "dp",
+        "sp",
+    ]
+]
+
+# SVE uses partial vectors of these widths; helpersve.h checks the available
+# vector length at runtime. Keep the compiler's vector length scalable.
+[
+    dft_kernel(
+        name = "sve%d%s" % (bits, precision),
+        config = config,
+        copts = ["-march=armv8-a+sve"],
+        enable = "SVE",
+        local_defines = _BUTTERFLY_DEFINES,
+        precision = precision,
+        target_compatible_with = ["@platforms//cpu:aarch64"],
+    )
+    for bits, config in [
+        (256, 8),
+        (512, 9),
+        (1024, 10),
+        (2048, 11),
+    ]
+    for precision in [
+        "dp",
+        "sp",
+    ]
+]

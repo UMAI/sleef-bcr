@@ -5,6 +5,8 @@ cc_library(
     hdrs = glob(["**/*.h"]),
     includes = ["."],
     visibility = [
+        "//src/dft:__pkg__",
+        "//src/dft-tester:__pkg__",
         "//src/libm:__pkg__",
     ],
     deps = ["//:sleef_config"],
@@ -13,7 +15,11 @@ cc_library(
 cc_library(
     name = "common",
     srcs = ["common.c"],
-    visibility = ["//src/libm:__pkg__"],
+    linkstatic = True,
+    visibility = [
+        "//src/dft:__pkg__",
+        "//src/libm:__pkg__",
+    ],
     deps = [":headers"],
 )
 
